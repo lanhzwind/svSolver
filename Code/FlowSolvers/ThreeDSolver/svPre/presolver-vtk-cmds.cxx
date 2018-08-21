@@ -2351,6 +2351,8 @@ int cmd_bct_create(char *cmd) {
         return CV_ERROR;
     }
 
+    bctFlip_=0;//reset flip status
+
     bctNodeNumTotal_+=bct.pd->GetNumberOfPoints();
     if(bct.pointNum>bctPointNumMax_){
         bctPointNumMax_=bct.pointNum;
