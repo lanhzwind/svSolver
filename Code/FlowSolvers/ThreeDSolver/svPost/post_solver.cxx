@@ -763,13 +763,16 @@ int GetWallElements(int neltot,int* ien, const char* wallfn, int* wallElementNum
 }
 
 int CalculateWallStress(int nshgtot, int wallElementNum, int* wallElements, bool applyWD, double* xglobal,double* dglobal,double* qglobal,double mu,
-        double** vtglobal, double** vwglobal){
+        double** vtglobal, double** vwglobal, double** wnglobal){
     int nsd=3;
     double* sA=new double[nshgtot]();
     double* sTF=new double[nshgtot*nsd]();
     double* sSF=new double[nshgtot*nsd]();
     double* wallTraction=new double[nshgtot*nsd]();
     double* wallShearStress=new double[nshgtot*nsd]();
+    double* sCount=new double[nshgtot]();
+    double* sNormal=new double[nshgtot*nsd]();
+    double* wallNormal=new double[nshgtot*nsd]();
 
     double     beArea, eJac,normM, temp, coef;
     double     beNorm[3], eNaNbx[4][3];
@@ -915,9 +918,11 @@ int CalculateWallStress(int nshgtot, int wallElementNum, int* wallElements, bool
 
         for(n2=0;n2<3;n2++){
             sA[nid[n2]] = sA[nid[n2]] + beArea;
+            sCount[nid[n2]] = sCount[nid[n2]] + 1.0;
             for(i=0;i<nsd;i++){
                 sTF[i*nshgtot+nid[n2]] = sTF[i*nshgtot+nid[n2]] - beArea*Tdn[i];
                 sSF[i*nshgtot+nid[n2]] = sSF[i*nshgtot+nid[n2]] - beArea*taue[i];
+                sNormal[i*nshgtot+nid[n2]] = sNormal[i*nshgtot+nid[n2]] + beNorm[i];
             }
         }
     }
@@ -929,15 +934,30 @@ int CalculateWallStress(int nshgtot, int wallElementNum, int* wallElements, bool
                 wallShearStress[i*nshgtot+n]  = sSF[i*nshgtot+n] /sA[n];
             }
         }
+        if (sCount[n]>0.0){
+            normM = 0.0;
+            for(i=0;i<nsd;i++){
+                wallNormal[i*nshgtot+n] = sNormal[i*nshgtot+n]/sCount[n];
+                normM = normM + wallNormal[i*nshgtot+n]*wallNormal[i*nshgtot+n];
+            }
+            normM = sqrt(normM);
+            for(i=0;i<nsd;i++){
+                wallNormal[i*nshgtot+n] = wallNormal[i*nshgtot+n]/normM;
+            }
+
+        }
     }
 
     *vtglobal=wallTraction;
     *vwglobal=wallShearStress;
+    *wnglobal=wallNormal;
 
     delete [] sA;
     delete [] sTF;
     delete [] sSF;
     delete [] x;
+    delete [] sCount;
+    delete [] sNormal;
 
     return CV_OK;
 }
@@ -1911,6 +1931,7 @@ int main(int argc, char* argv[])
     bool RequestedSolution= false;
     bool RequestedvInPlaneTraction = false;
     bool RequestedrInPlaneTraction = false;
+    bool RequestedWallNormal = false;
     bool RequestedDisplacements  = false;
     bool RequestedWallprops  = false;
     bool RequestedvWSS  = false;
@@ -1963,6 +1984,7 @@ int main(int argc, char* argv[])
             cout << "  -vtkcombo           : Combine all VTK in single file" <<endl;
             cout << "  -sol                : Reduce solution(pressure and velocity)"<<endl;
             cout << "  -traction           : Reduce in-plane traction"<<endl;
+            cout << "  -wallnormal         : Reduce wall normal"<<endl;
             cout << "  -disp               : Reduce displacements"<<endl;
             cout << "  -wallprop           : Reduce wall properties"<<endl;
             cout << "  -rho                : Fluid density"<<endl;
@@ -2042,6 +2064,9 @@ int main(int argc, char* argv[])
         else if(tmpstr=="-traction"){
             RequestedvInPlaneTraction = true;
             RequestedrInPlaneTraction = true;
+        }
+        else if(tmpstr=="-wallnormal"){
+            RequestedWallNormal = true;
         }
         else if(tmpstr=="-disp"){
             RequestedDisplacements = true;
@@ -2158,6 +2183,9 @@ int main(int argc, char* argv[])
     if(RequestedvInPlaneTraction || RequestedrInPlaneTraction){
         cout << "Will reduce inplane traction as requested" << endl;
     }
+    if(RequestedWallNormal){
+        cout << "Will reduce wall normal" << endl;
+    }
     if(RequestedDisplacements){
         cout << "Will reduce displacement field as requested" << endl;
     }
@@ -2177,7 +2205,7 @@ int main(int argc, char* argv[])
         cout << "Will reduce speed and pressure errors as requested" << endl;
     }
 
-    if(RequestedSolution||RequestedTimeDeriv||RequestedDisplacements||RequestedvWSS||RequestedrWSS||RequestedvInPlaneTraction||RequestedrInPlaneTraction||RequestedWallprops||RequestedYbar||RequestedYerror){
+    if(RequestedSolution||RequestedTimeDeriv||RequestedDisplacements||RequestedvWSS||RequestedrWSS||RequestedvInPlaneTraction||RequestedrInPlaneTraction||RequestedWallNormal||RequestedWallprops||RequestedYbar||RequestedYerror){
         RequestedAll=false;
     }
 
@@ -2190,6 +2218,7 @@ int main(int argc, char* argv[])
         RequestedrWSS  = true;
         RequestedvInPlaneTraction = true;
         RequestedrInPlaneTraction = true;
+        RequestedWallNormal = true;
         RequestedWallprops  = true;
         RequestedYbar=true;
         RequestedYerror=true;
@@ -2243,6 +2272,7 @@ int main(int argc, char* argv[])
     double *qglobal = NULL;
     double *vtglobal = NULL;
     double *rtglobal = NULL;
+    double *wnglobal = NULL;
     double *dglobal = NULL;
     double *vwglobal = NULL;
     double *rwglobal = NULL;
@@ -2439,6 +2469,7 @@ int main(int argc, char* argv[])
             RequestedSolution = true;
             RequestedvInPlaneTraction = true;
             RequestedrInPlaneTraction = true;
+            RequestedWallNormal = true;
             RequestedDisplacements  = true;
             //RequestedWallprops  = true;
             RequestedvWSS  = true;
@@ -2507,7 +2538,7 @@ int main(int argc, char* argv[])
                     cout << "ERROR: no solution found for wall stress calculation!" << endl;
                     return 1;
                 }
-                if ( (CalculateWallStress(nshgtot,wallElementNum,wallElements,RequestedApplyWD,xglobal,dglobal,qglobal,mu,&vtglobal,&vwglobal)) == CV_ERROR ) {
+                if ( (CalculateWallStress(nshgtot,wallElementNum,wallElements,RequestedApplyWD,xglobal,dglobal,qglobal,mu,&vtglobal,&vwglobal,&wnglobal)) == CV_ERROR ) {
                     return 1;
                 }
             }
@@ -2533,6 +2564,19 @@ int main(int argc, char* argv[])
                 } else {
                     cout << "ERROR reading rin plane traction in step " << stepnumber << "!" << endl;
                     return 1;
+                }
+            }
+        }
+
+        if (RequestedWallNormal) {
+            if(!RequestedCalcWS){
+                if ( (pp->ParseRestartFile( stepnumber , "wall normal" , &numt, &wnglobal)) == CV_ERROR ) {
+                    if (RequestedAll) {
+                        RequestedWallNormal = false;
+                    } else {
+                        cout << "ERROR reading wall normal in step " << stepnumber << "!" << endl;
+                        return 1;
+                    }
                 }
             }
         }
@@ -2748,6 +2792,31 @@ int main(int argc, char* argv[])
                 gzprintf(frest, "\n");
             }
 
+            //wall normal
+            if(RequestedWallNormal) {
+                gzprintf(frest, "    analysis results \"wall normal\"\n");
+                gzprintf(frest, "      number of data %i\n",numNodes);
+                gzprintf(frest, "      type \"nodal\"\n");
+                gzprintf(frest, "      order \"vector\"\n");
+                gzprintf(frest, "      number of components 3\n");
+                gzprintf(frest, "      components\n");
+                gzprintf(frest, "      \"x\"\n");
+                gzprintf(frest, "      \"y\"\n");
+                gzprintf(frest, "      \"z\"\n");
+                gzprintf(frest, "      end components\n");
+                gzprintf(frest, "      length 3\n");
+                gzprintf(frest, "      data\n");
+                for (i=0; i< nshgtot; i++) {
+                    for (j=1; j < 4; j++) {
+                        gzprintf(frest,"%25.15le ",wnglobal[j*nshgtot+i]);
+                    }
+                    gzprintf(frest,"\n");
+                }
+                gzprintf(frest, "      end data\n");
+                gzprintf(frest, "    end analysis results\n");
+                gzprintf(frest, "\n");
+            }
+
             // displacements
             if(RequestedDisplacements) {
                 gzprintf(frest, "    analysis results \"displacement\"\n");
@@ -2893,6 +2962,7 @@ int main(int argc, char* argv[])
             char vname[80];
             char t1name[80];
             char t2name[80];
+            char wnname[80];
             char dname[80];
             char wpname[80];
             char w1name[80];
@@ -2907,6 +2977,7 @@ int main(int argc, char* argv[])
             vname[0] = '\0';
             t1name[0] = '\0';
             t2name[0] = '\0';
+            wnname[0] = '\0';
             dname[0] = '\0';
             wpname[0] = '\0';
             w1name[0] = '\0';
@@ -2923,6 +2994,7 @@ int main(int argc, char* argv[])
                 sprintf(vname,"%s","velocity");
                 sprintf(t1name,"%s","vinplane_traction");
                 sprintf(t2name,"%s","rinplane_traction");
+                sprintf(wnname,"%s","wall_normal");
                 sprintf(dname,"%s","displacement");
                 sprintf(wpname,"%s","wallproperty");
                 sprintf(w1name,"%s","vWSS");
@@ -2938,6 +3010,7 @@ int main(int argc, char* argv[])
                 sprintf(vname,"%s_%05i","velocity",stepnumber);
                 sprintf(t1name,"%s_%05i","vinplane_traction",stepnumber);
                 sprintf(t2name,"%s_%05i","rinplane_traction",stepnumber);
+                sprintf(wnname,"%s_%05i","wall_normal",stepnumber);
                 sprintf(dname,"%s_%05i","displacement",stepnumber);
                 sprintf(wpname,"%s_%05i","wallproperty",0);
                 sprintf(w1name,"%s_%05i","vWSS",stepnumber);
@@ -3024,6 +3097,26 @@ int main(int argc, char* argv[])
 
                 traction->Delete();
 
+            }
+
+            // ===========
+            // WALL NORMAL
+            // ===========
+
+            if(RequestedWallNormal) {
+
+                vtkDoubleArray *wallnormal = vtkDoubleArray::New();
+                wallnormal->SetNumberOfComponents(3);
+                wallnormal->Allocate(nshgtot,10000);
+                wallnormal->SetNumberOfTuples(nshgtot);
+                wallnormal->SetName(wnname);
+                for (i=0; i< nshgtot; i++) {
+                    wallnormal->SetTuple3(i,wnglobal[0*nshgtot+i],wnglobal[1*nshgtot+i],wnglobal[2*nshgtot+i]);
+                }
+
+                grid->GetPointData()->AddArray(wallnormal);
+
+                wallnormal->Delete();
             }
 
             // =============
@@ -3368,6 +3461,7 @@ int main(int argc, char* argv[])
         if (qglobal != NULL) delete [] qglobal;
         if (vtglobal != NULL) delete [] vtglobal;
         if (rtglobal != NULL) delete [] rtglobal;
+        if (wnglobal != NULL) delete [] wnglobal;
         if (dglobal != NULL) delete [] dglobal;
         //if (wpglobal != NULL) delete [] wpglobal;//no change with time. so keep it.
         if (vwglobal != NULL) delete [] vwglobal;
@@ -3381,6 +3475,7 @@ int main(int argc, char* argv[])
         qglobal = NULL;
         vtglobal = NULL;
         rtglobal = NULL;
+        wnglobal = NULL;
         dglobal = NULL;
         //wpglobal = NULL;//no change with time. so keep it.
         vwglobal = NULL;
@@ -3401,6 +3496,7 @@ int main(int argc, char* argv[])
     if (qglobal != NULL) delete [] qglobal;
     if (vtglobal != NULL) delete [] vtglobal;
     if (rtglobal != NULL) delete [] rtglobal;
+    if (wnglobal != NULL) delete [] wnglobal;
     if (dglobal != NULL) delete [] dglobal;
     if (wpglobal != NULL) delete [] wpglobal;
     if (vwglobal != NULL) delete [] vwglobal;
